@@ -8,6 +8,7 @@ from tools.speech_t import speech_text
 import os
 import numpy as np
 import json
+import gc
 # コマンドの定義
 SET = 0
 SUM = 1
@@ -94,7 +95,8 @@ class StreamServer():
             wf.writeframes(r_packet[10:])
             wf.close()
             text,type_ = speech_text(output_path)
-
+            del r_packet
+            gc.collect()
             print('テキスト化')
             print(text)
             pac = wav_id.to_bytes(5, 'big')
