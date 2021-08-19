@@ -96,7 +96,7 @@ class StreamServer():
 
 			pac += text_length.to_bytes(5,'big')
 			pac += text_b
-			client.sendall(pac)
+			send_pac(client,0,pac)
 			print('sending text complete')
 			client.close()
 
@@ -213,7 +213,7 @@ class StreamServer():
 
 			if nchanneles == 2:
 				data = data[::nchanneles]
-			data =[data[idx:idx + framerate] for idx in range(0,len(data), framerate)]
+			data =[data[idx:idx +int(framerate/2)] for idx in range(0,len(data),int(framerate/2))]
 			save = 0
 			save_data = bytes()
 			pac = bytes()
@@ -252,8 +252,8 @@ class StreamServer():
 							print(file_path)
 
 							text,type_ = speech_text(file_path)
-							if text:
-								text += "。"
+							#if text:
+							#	text += "。"
 							print('テキスト化')
 							print(text)
 							pac += int(Id).to_bytes(5, 'big')
@@ -263,6 +263,8 @@ class StreamServer():
 								pac += int(0).to_bytes(1,'big')
 							text_b = text.encode()
 							text_length = len(text_b)
+							print('ID:',Id)
+							print('text_len:',len(text_b))
 							pac += text_length.to_bytes(5,'big')
 							pac += text_b
 
@@ -272,8 +274,7 @@ class StreamServer():
 						length = 0
 						save = 0
 						save_data = bytes()
-					
-			client.sendall(pac)
+			send_pac(client,0,pac)	
 			print('sending text complete')
 			print(len(pac))
 			client.close()
@@ -363,7 +364,9 @@ def send_pac_recieve(type_ID,pac):
 
 if __name__ == '__main__':
 	port = 9012
-	add="ip-172-31-40-14.ap-northeast-1.compute.internal"
-	mss_server = StreamServer(add, port)
+	#port = 49153
+#	add="ip-172-31-40-14.ap-northeast-1.compute.internal"
+	add='0.0.0.0'
+	mss_server= StreamServer(add, port)
 	mss_server.run()
 
