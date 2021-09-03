@@ -5,6 +5,7 @@ import wave
 import time
 from BertSum.server_BertSum.bert_summary import Bertsum_pred
 from tools.speech_t import speech_text
+from tools.MFCC.MFCC import FeatureExtractor2
 import os
 import numpy as np
 import json
@@ -21,6 +22,35 @@ CON = 5
 GIJI = 6
 MSGLEN = 8192
 BAFFER = 40960*2
+
+#会議の音声を読み込み
+input_path = './tools/MFCC/162419449465.wav' 
+waveFile = wave.open(input_path, 'r')
+data = waveFile.readframes(-1)
+nchanneles = waveFile.getnchannels()
+samplewidth = waveFile.getsampwidth()
+framerate = waveFile.getframerate()
+if samplewidth == 2:
+    compare_array = np.frombuffer(data,dtype='int16')
+else:
+    compare_array = np.frombuffer(data,dtype='int24')
+waveFile.close()
+#MFCCパラメータ
+num_mel_bins = 23
+num_ceps = 13
+sample_frequency = framerate
+frame_length = 25
+frame_shift = 10
+low_frequency = 20
+high_frequency = sample_frequency / 2
+dither = 1.0
+feat_extractor = FeatureExtractor2(sample_frequency=sample_frequency, frame_length = frame_length,
+                                  frame_shift = frame_shift,num_mel_bins = num_mel_bins,num_ceps = num_ceps,
+                                  low_frequency=low_frequency,high_frequency=high_frequency,dither=dither)
+mfcc_th = 3.0
+mfcc0 = feat_extractor.ComputeMFCC(compare_array[sample_frequency:sample_frequency*4])
+def cos_sim(v1, v2):
+    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
 
 class StreamServer():
 	def __init__(self, server_host, server_port):
@@ -76,28 +106,45 @@ class StreamServer():
 			framerate = int.from_bytes(MSG[0:4], 'big')
 			samplewidth = int.from_bytes(MSG[4:6], 'big')
 			nchanneles = int.from_bytes(MSG[6:8],'big')
-			wf = wave.open(output_path, 'wb')
-			wf.setnchannels(nchanneles)
-			wf.setsampwidth(samplewidth)
-			wf.setframerate(framerate)
-			wf.writeframes(MSG[8:])
-			wf.close()
-			text,type_ = speech_text(output_path)
-			print('テキスト化')
-			print(text)
-			pac = wav_id.to_bytes(5, 'big')
-			if type_:
-				pac += int(1).to_bytes(1,'big')
+			data = MSG[8:]
+			if samplewidth == 2:
+				sig_array = np.frombuffer(data,dtype='int16')
 			else:
-				pac += int(0).to_bytes(1,'big')
+				sig_array = np.frombuffer(data,dtype='int24')
+			
 
-			text_b = text.encode()
-			text_length = len(text_b)
+			mfcc1 = feat_extractor.ComputeMFCC(sig_array[:min(framerate*3,len(sig_array))])
+			score = 0
+			for frame in range(min(8,len(mfcc1[:,0]))):	
+			    score += cos_sim(mfcc0[frame,:],mfcc1[frame,:])
+			print("スコア:",score)
+			
+			if score > mfcc_th:
+                            wf = wave.open(output_path, 'wb')
+                            wf.setnchannels(nchanneles)
+                            wf.setsampwidth(samplewidth)
+                            wf.setframerate(framerate)
+                            wf.writeframes(MSG[8:])
+                            wf.close()
+                            text,type_ = speech_text(output_path)
+                            print('テキスト化')
+                            print(text)
+                            pac = wav_id.to_bytes(5, 'big')
+                            if type_:
+                                    pac += int(1).to_bytes(1,'big')
+                            else:
+                                    pac += int(0).to_bytes(1,'big')
 
-			pac += text_length.to_bytes(5,'big')
-			pac += text_b
-			send_pac(client,0,pac)
-			print('sending text complete')
+                            text_b = text.encode()
+                            text_length = len(text_b)
+
+                            pac += text_length.to_bytes(5,'big')
+                            pac += text_b
+                            send_pac(client,1,pac)
+                            print('sending text complete')
+			else:
+			    pac  = bytes()
+			    send_pac(client,0,pac)
 			client.close()
 
 		# WAV再生の処理
@@ -204,76 +251,31 @@ class StreamServer():
 			nchanneles = int.from_bytes(MSG[6:8],'big')
 
 			print("Channel num : ", nchanneles)
-			print("Sample width : ", samplewidth) 
-			print("Sampling rate : ", framerate)
-			if samplewidth == 2:
-				data = np.frombuffer(MSG[8:], dtype='int16')
-			elif samplewidth == 4:
-				data = np.frombuffer(MSG[8:], dtype='int32')
+			print(file_path)
 
-			if nchanneles == 2:
-				data = data[::nchanneles]
-			data =[data[idx:idx +int(framerate/2)] for idx in range(0,len(data),int(framerate/2))]
+			text,type_ = speech_text(file_path)
+			#if text:
+			#	text += "。"
+			print('テキスト化')
+			print(text)
+			pac += int(Id).to_bytes(5, 'big')
+			if type_:
+			    pac += int(1).to_bytes(1,'big')
+			else:
+			    pac += int(0).to_bytes(1,'big')
+			text_b = text.encode()
+			text_length = len(text_b)
+			print('ID:',Id)
+			print('text_len:',len(text_b))
+			pac += text_length.to_bytes(5,'big')
+			pac += text_b
+
+			file_id += 1
+						    
+			stop_counter = 0    
+			length = 0
 			save = 0
 			save_data = bytes()
-			pac = bytes()
-			stop_counter = 0
-			length = 0
-			file_id = 0
-			for d in data:
-
-				# 閾値以上の場合はファイルに保存
-				if d.max()/ 32768.0 > 0.1:
-					save = 1
-				    
-				if save == 1:
-					save_data += d.tobytes()
-					length += 1
-
-				if d.max()/ 32768.0 <= 0.1 and save == 1:
-
-					stop_counter += 1
-					#設定秒間閾値を下回ったら一旦終了¥
-					if stop_counter >= 1:
-							      
-						#設定秒間以上だったら保存
-						if length  > 2:
-							Id = str(wav_id)+str(file_id)
-							print(Id)
-							file_path = self.cla_dir[client.getpeername()[0]] +Id+ ".wav"
-
-							wf = wave.open(file_path, 'wb')
-							wf.setnchannels(1)
-							wf.setsampwidth(samplewidth)
-							wf.setframerate(framerate)
-							wf.writeframes(save_data)
-							wf.close()
-							print('save')
-							print(file_path)
-
-							text,type_ = speech_text(file_path)
-							#if text:
-							#	text += "。"
-							print('テキスト化')
-							print(text)
-							pac += int(Id).to_bytes(5, 'big')
-							if type_:
-								pac += int(1).to_bytes(1,'big')
-							else:
-								pac += int(0).to_bytes(1,'big')
-							text_b = text.encode()
-							text_length = len(text_b)
-							print('ID:',Id)
-							print('text_len:',len(text_b))
-							pac += text_length.to_bytes(5,'big')
-							pac += text_b
-
-							file_id += 1
-						    
-						stop_counter = 0    
-						length = 0
-						save = 0
-						save_data = bytes()
 			send_pac(client,0,pac)	
 			print('sending text complete')
 			print(len(pac))
